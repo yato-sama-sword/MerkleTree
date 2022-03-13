@@ -1,6 +1,7 @@
 import ConstVal
 import queue
 from hashlib import sha256
+from graphviz import Digraph
 
 
 # Computer A sends a hash of the file to computer B.
@@ -11,18 +12,35 @@ from hashlib import sha256
 # Repeat steps 4 and 5 until you've found the data blocks(s) that are inconsistent.
 # It's possible to find more than one data block that is wrong because there might be more than one error in the data.
 
-def my_hash(s1, s2):
+def my_hash(s1, s2=''):
     return sha256((s1 + s2).encode()).hexdigest()
+
+
+def get_key(my_list):
+    keys = []
+    for it in my_list:
+        keys.append(it.key)
+    return keys
+
+
+def get_val(my_list):
+    vals = []
+    for it in my_list:
+        vals.append(it.val)
+    return vals
 
 
 class Node:
     def __init__(self, _key, _node_val='', _node_type=ConstVal.INNER_NODE):
         self.key = _key
-        self.node_val = _node_val
-        self.node_type = _node_type
-        self.left_son = None
-        self.right_son = None
+        self.val = _node_val
+        self.type = _node_type
+        self.left = None
+        self.right = None
         self.parent = None
+
+    def __lt__(self, other):
+        return self.key < other.key
 
 
 class MerkleTree:
@@ -30,6 +48,7 @@ class MerkleTree:
         self.root = None
         self.min_hash = 0
         self.max_hash = 0
+        self.level_traversal = []
 
     def fit(self, data):
         """
@@ -47,60 +66,74 @@ class MerkleTree:
                 self.root = left
                 break
             right = q.get()
-            node = Node(my_hash(left.node_val, right.node_val))
+            while left.key > right.key:
+                q.put(left)
+                left = right
+                right = q.get()
+            node = Node(my_hash(left.val, right.val))
             left.parent = node
-            node.left_son = left
+            node.left = left
             right.parent = node
-            node.right_son = right
+            node.right = right
             node.key = (left.key + right.key) / 2
             q.put(node)
         return self.root
 
-    def check(self, target):
-        """
-        根据给定的若干 hash 值寻找节点
-        :param target: 给定路径 前序遍历形式的数组
-        :return: T / F
-        """
+    def show_tree(self):
+        dot = Digraph(filename=r'result/my_tree')
+        if self.root is None:
+            return None
         q = queue.Queue()
-        pos = 0
         q.put(self.root)
         while not q.empty():
             now = q.get()
-            if target[pos] == now.key:
-                pos += 1
-            else:
-                return False
-            q.put()
+            if now is None:
+                self.level_traversal.append(None)
+                continue
+            dot.node(str(now.key))
+            if now.parent is not None:
+                dot.edge(str(now.parent.key), str(now.key))
+            self.level_traversal.append(now.key)
+            q.put(now.left)
+            q.put(now.right)
+        dot.view()
 
-        # return self.check_tree(target, self.root)
+    def check(self, target):
+        """
+        根据给定的若干 hash 值寻找节点
+        :param target: 给定路径 一条/两条路径
+        :return: T / F
+        """
+        pass
 
     def search(self, target):
         """
         寻找给定目标
-        :param target: 给定目标的 Hash 值
-        :return: 存在则返回路径 不存在则返回小于的最大的路径和大于的最小的路径 路径为 DFS序
+        :param target: 给定目标的 key 值
+        :return: 存在则返回路径 不存在则返回小于的最大的路径和大于的最小的路径 分开返回两条路径
         """
         result = self.search_tree(target, self.root)
         if not result[-1]:
-            min_path = self.search_tree_min(target, self.root)
-            return [False, min_path.append(self.find_bigger_neighbor(min_path[-1]))]
+            smaller = self.search_tree_smaller(target, self.root)
+            return [False, smaller,
+                    self.search_tree_bigger(target, smaller[-1])]  # 左侧路径； 右侧路径是以左侧路径为起点的路径
         return [True, result]
 
     def search_tree(self, target, root):
         if root is None:
             return [False]
-        now_ans = [root]
-        if target == root.key:
-            return now_ans
-        if target <= root.key:
-            now_ans.append(self.search_tree(target, root.left))
+        now_vals = [root]
+        if target == root.key and root.type == ConstVal.LEAF_NODE:
+            return now_vals
+        if target > root.key:
+            res = self.search_tree(target, root.right)
+            now_vals.extend(res)
         else:
-            now_ans.append(self.search_tree(target, root.right))
-        now_ans.append(root)
-        return now_ans
+            res = self.search_tree(target, root.left)
+            now_vals.extend(res)
+        return now_vals
 
-    def search_tree_min(self, target, root):
+    def search_tree_smaller(self, target, root):
         """
         找小于target的最大的节点
         方法：
@@ -108,20 +141,44 @@ class MerkleTree:
                 find_right
             else:
                 find_left
+
         :param target:
         :param root:
         :return:
         """
         if root is None:
-            return [False]
+            return []
         now_ans = [root]
+        if root.key < target:
+            now_ans.extend(self.search_tree_smaller(target, root.right))
+        else:
+            now_ans.extend(self.search_tree_smaller(target, root.left))
+        return now_ans
 
-    def find_bigger_neighbor(self, root):
+    def search_tree_bigger(self, target, root):
+        return self.find_bigger_neighbor(target, root)
+
+    def find_bigger_neighbor(self, target, root):
         """
         找当前节点的右侧的相邻节点
         如果当前节点是左儿子，就找右儿子
-        如果当前节点是右儿子，就找grandfather的右儿子的一直往左的儿子
-        如果没有更大的，怎么证明？（老师好像也没讲）
+        如果当前节点是右儿子，就找有右儿子的祖先的一直往左的儿子
         :return:
         """
-        pass
+        if root.parent is None:
+            return None
+        if root.parent.key > root.key:
+            return [root, root.parent, root.parent.right]
+        else:
+            ans = []
+            while root.parent.key < target:
+                ans.append(root)
+                root = root.parent
+            root = root.parent
+            ans.append(root)
+            root = root.right
+            ans.append(root)
+            while root is not None:
+                ans.append(root)
+                root = root.left
+            return ans
