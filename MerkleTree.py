@@ -46,8 +46,6 @@ class Node:
 class MerkleTree:
     def __init__(self):
         self.root = None
-        self.min_hash = 0
-        self.max_hash = 0
         self.level_traversal = []
 
     def fit(self, data):
@@ -57,7 +55,6 @@ class MerkleTree:
         :return:
         """
         q = queue.Queue()
-        self.max_hash = len(data) - 1
         for it in data:
             q.put(it)
         while not q.empty():
@@ -70,12 +67,12 @@ class MerkleTree:
                 q.put(left)
                 left = right
                 right = q.get()
-            node = Node(my_hash(left.val, right.val))
+            node = Node((left.key + right.key) / 2)
             left.parent = node
             node.left = left
             right.parent = node
             node.right = right
-            node.key = (left.key + right.key) / 2
+            node.val = my_hash(left.val, right.val)
             q.put(node)
         return self.root
 
@@ -104,7 +101,21 @@ class MerkleTree:
         :param target: 给定路径 一条/两条路径
         :return: T / F
         """
-        pass
+        root = self.root
+        for path in target:
+            if root.val == path[0]:
+                for val in range(1, len(path)):
+                    if root.left is not None and root.left.val == path[val]:
+                        root = root.left
+                    elif root.right is not None and root.right.val == path[val]:
+                        root = root.right
+                    elif root.parent is not None and root.parent.val == path[val]:
+                        root = root.parent
+                    else:
+                        return False
+            else:
+                return False
+        return True
 
     def search(self, target):
         """
